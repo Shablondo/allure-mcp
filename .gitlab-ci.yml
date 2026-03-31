@@ -9,7 +9,7 @@ variables:
 
 stages:
   - prepare
-  - publish
+  - build
 
 prepare:
   stage: prepare
