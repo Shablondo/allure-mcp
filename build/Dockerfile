@@ -9,6 +9,7 @@ WORKDIR /app
 # Копируем файлы проекта для установки пакета
 COPY pyproject.toml README.md ./
 COPY src ./src
+COPY requirements.txt .
 
 # Устанавливаем пакет вместе с зависимостями
 RUN pip install --upgrade pip && pip install --no-cache-dir .
