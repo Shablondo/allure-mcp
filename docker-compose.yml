@@ -1,0 +1,19 @@
+services:
+  allure-testops-mcp:
+    build: .
+    image: allure-testops-mcp
+    container_name: allure-testops-mcp
+    restart: unless-stopped
+    environment:
+      # URL вашего сервера Allure TestOps
+      - ALLURE_TESTOPS_URL=${ALLURE_TESTOPS_URL}
+      # API токен для аутентификации
+      - ALLURE_TESTOPS_API_TOKEN=${ALLURE_TESTOPS_API_TOKEN}
+      # ID проекта по умолчанию
+      - ALLURE_TESTOPS_PROJECT_ID=${ALLURE_TESTOPS_PROJECT_ID}
+      # Таймаут запросов в секундах
+      - ALLURE_TESTOPS_TIMEOUT=${ALLURE_TESTOPS_TIMEOUT:-30}
+      # Включить все контроллеры MCP
+      - ALLURE_TESTOPS_ENABLED_CONTROLLERS=all
+    stdin_open: true
+    tty: true
