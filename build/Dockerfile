@@ -13,7 +13,7 @@ COPY src ./src
 COPY requirements.txt .
 
 # Устанавливаем пакет вместе с зависимостями
-RUN pip install --upgrade pip && pip install .
+RUN pip install --upgrade pip && pip install --no-cache-dir .
 
 # Команда для запуска MCP сервера
 CMD ["python", "-m", "allure_testops_mcp.server"]
