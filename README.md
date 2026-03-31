@@ -1,93 +1,787 @@
-# allure-mcp
+# Allure TestOps MCP Server
 
+MCP сервер для интеграции с [Allure TestOps](https://qameta.io/allure-testops/).
 
+Предоставляет полный набор инструментов для работы с тест-кейсами, включая поиск, создание, обновление, удаление, а также управление комментариями, тегами, вложениями и тест-планами.
 
-## Getting started
+## Что это такое?
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+MCP (Model Context Protocol) сервер позволяет AI-ассистентам (например, KiloCode) взаимодействовать с Allure TestOps API. Это означает, что вы можете попросить AI-ассистента найти, создать или изменить тест-кейсы в вашем Allure TestOps, и он сделает это через этот сервер.
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+## Требования
 
-## Add your files
+Перед началом убедитесь, что у вас установлено:
 
-* [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+1. **Docker Desktop** - для запуска MCP сервера в контейнере
+   - Скачайте с https://www.docker.com/products/docker-desktop
+   - Установите и запустите Docker Desktop
+   - Проверьте установку: откройте терминал и выполните `docker --version`
 
+2. **Доступ к GitLab** - для клонирования проекта
+   - Учетная запись в вашем GitLab / GitHub / корпоративном Git-сервере
+   - Права на чтение репозитория с этим MCP сервером
+
+3. **Учетная запись в Allure TestOps** - для работы с тест-кейсами
+   - Доступ к проекту с тест-кейсами
+   - API токен (как получить - см. ниже)
+
+## Пошаговая инструкция
+
+### Шаг 1. Клонирование проекта
+
+1. Откройте терминал (на macOS: Terminal, на Windows: PowerShell или Command Prompt)
+
+2. Перейдите в папку, где хотите сохранить проект:
+   ```bash
+   cd ~/projects
+   ```
+   *(если папки нет, создайте её: `mkdir ~/projects && cd ~/projects`)*
+
+3. Клонируйте репозиторий:
+   ```bash
+   git clone https://git.example.com/team/mcp-allure.git
+   ```
+
+4. Перейдите в папку проекта:
+   ```bash
+   cd mcp-allure
+   ```
+
+### Шаг 2. Получение API токена Allure TestOps
+
+1. Откройте ваш Allure TestOps в браузере (например, `https://your-allure-testops.com/`)
+
+2. Войдите в систему
+
+3. Нажмите на ваш аватар/имя в правом верхнем углу
+
+4. Выберите **Profile Settings** (Настройки профиля)
+
+5. Найдите раздел **API Tokens** (или **Personal Access Tokens**)
+
+6. Нажмите **Create new token** (Создать новый токен)
+
+7. Введите название токена (например, "KiloCode MCP")
+
+8. Нажмите **Create** (Создать)
+
+9. **Важно:** Скопируйте токен и сохраните его в безопасном месте. Вы больше не увидите его!
+
+10. Узнайте ID проекта, с которым будете работать:
+    - Откройте нужный проект в Allure TestOps
+    - ID проекта можно найти в URL: `https://your-allure-testops.com/project/123/...` - здесь `123` это ID проекта
+    - Запомните или запишите этот ID
+
+### Шаг 3. Настройка переменных окружения
+
+Сервер читает настройки напрямую из переменных окружения. Файл `.env` не обязателен: его можно использовать только как локальное удобство для запуска вручную или через Docker Compose.
+
+#### Вариант A. Передавать значения напрямую в MCP/KiloCode конфиг
+
+Используйте переменные окружения `ALLURE_TESTOPS_*` прямо в конфигурации клиента. Это рекомендуемый вариант для KiloCode.
+
+#### Вариант B. Использовать локальный `.env` файл
+
+Если вам удобнее хранить настройки локально в файле, можно создать `.env`:
+
+1. В папке проекта создайте файл `.env`:
+   ```bash
+   touch .env
+   ```
+
+2. Откройте файл `.env` в любом текстовом редакторе (VS Code, TextEdit, Notepad и т.д.)
+
+3. Добавьте следующие параметры:
+   ```env
+   # URL вашего сервера Allure TestOps
+   ALLURE_TESTOPS_URL=https://your-allure-testops.com
+
+   # API токен для аутентификации
+   ALLURE_TESTOPS_API_TOKEN=your-api-token
+
+   # ID проекта по умолчанию
+   ALLURE_TESTOPS_PROJECT_ID=123
+
+   # Таймаут запросов в секундах (опционально, по умолчанию 30)
+   ALLURE_TESTOPS_TIMEOUT=30
+
+   # Кэширование в секундах (опционально, по умолчанию 300 = 5 минут)
+   ALLURE_TESTOPS_CACHE_TTL=300
+
+   # Retry настройки (опционально)
+   ALLURE_TESTOPS_RETRY_ATTEMPTS=3
+   ALLURE_TESTOPS_NETWORK_RETRY_ATTEMPTS=1
+   ALLURE_TESTOPS_RETRY_DELAY=2
+
+   # Circuit Breaker (опционально)
+   ALLURE_TESTOPS_CIRCUIT_BREAKER_FAILURES=5
+   ALLURE_TESTOPS_CIRCUIT_BREAKER_TIMEOUT=60
+   ```
+
+4. **Замените значения:**
+   - `https://your-allure-testops.com` - на URL вашего Allure TestOps
+   - `your-api-token` - на API токен, который вы скопировали на шаге 2
+   - `123` - на ID вашего проекта, который вы узнали на шаге 2
+
+5. Сохраните файл
+
+### Шаг 4. Сборка Docker образа
+
+1. Убедитесь, что Docker Desktop запущен:
+   ```bash
+   docker ps
+   ```
+   *(если видите список контейнеров или пустой список - всё ок, если ошибка - запустите Docker Desktop)*
+
+2. Соберите Docker образ:
+   ```bash
+   docker build -t allure-testops-mcp:latest .
+   ```
+
+3. Дождитесь окончания сборки (это может занять несколько минут). В конце вы должны увидеть:
+   ```
+   Successfully built <идентификатор>
+   Successfully tagged allure-testops-mcp:latest
+   ```
+
+4. Проверьте, что образ создан:
+   ```bash
+   docker images | grep allure-testops-mcp
+   ```
+
+   Во время сборки Docker использует [`.dockerignore`](/Users/shablondo/allure-testops-mcp/.dockerignore), поэтому локальные секреты, шаблоны окружения и служебные файлы не попадают в build context.
+
+### Шаг 5. Настройка MCP конфигурации
+
+Теперь нужно настроить ваш MCP клиент (например, KiloCode) для использования этого сервера.
+
+#### Если вы используете KiloCode:
+
+1. Откройте настройки KiloCode
+
+2. Найдите раздел **MCP Servers** или **MCP Configuration**
+
+3. Добавьте следующую конфигурацию, если хотите передавать значения напрямую без `.env` файла:
+
+```json
+{
+  "mcpServers": {
+    "allure-testops": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--name",
+        "allure-testops-mcp",
+        "-e",
+        "ALLURE_TESTOPS_URL",
+        "-e",
+        "ALLURE_TESTOPS_API_TOKEN",
+        "-e",
+        "ALLURE_TESTOPS_PROJECT_ID",
+        "-e",
+        "ALLURE_TESTOPS_TIMEOUT",
+        "-e",
+        "ALLURE_TESTOPS_CACHE_TTL",
+        "-e",
+        "ALLURE_TESTOPS_RETRY_ATTEMPTS",
+        "-e",
+        "ALLURE_TESTOPS_NETWORK_RETRY_ATTEMPTS",
+        "-e",
+        "ALLURE_TESTOPS_RETRY_DELAY",
+        "-e",
+        "ALLURE_TESTOPS_CIRCUIT_BREAKER_FAILURES",
+        "-e",
+        "ALLURE_TESTOPS_CIRCUIT_BREAKER_TIMEOUT",
+        "allure-testops-mcp:latest"
+      ],
+      "env": {
+        "ALLURE_TESTOPS_URL": "https://your-allure-testops.com",
+        "ALLURE_TESTOPS_API_TOKEN": "***",
+        "ALLURE_TESTOPS_PROJECT_ID": "123",
+        "ALLURE_TESTOPS_TIMEOUT": "30",
+        "ALLURE_TESTOPS_CACHE_TTL": "300",
+        "ALLURE_TESTOPS_RETRY_ATTEMPTS": "3",
+        "ALLURE_TESTOPS_NETWORK_RETRY_ATTEMPTS": "1",
+        "ALLURE_TESTOPS_RETRY_DELAY": "2",
+        "ALLURE_TESTOPS_CIRCUIT_BREAKER_FAILURES": "5",
+        "ALLURE_TESTOPS_CIRCUIT_BREAKER_TIMEOUT": "60"
+      },
+      "disabled": false,
+      "alwaysAllow": []
+    }
+  }
+}
 ```
-cd existing_repo
-git remote add origin https://scm.x5.ru/omni/autotest-team/allure-mcp.git
-git branch -M master
-git push -uf origin master
+
+4. Если вам удобнее использовать `.env`, можно оставить конфигурацию с `--env-file`:
+
+```json
+{
+  "mcpServers": {
+    "allure-testops": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--name",
+        "allure-testops-mcp",
+        "--env-file",
+        "/полный/путь/к/проекту/mcp-allure/.env",
+        "allure-testops-mcp:latest"
+      ],
+      "disabled": false,
+      "alwaysAllow": []
+    }
+  }
+}
 ```
 
-## Integrate with your tools
+5. **Замените путь:**
+   - `/полный/путь/к/проекту/mcp-allure/.env` - на полный путь к вашему файлу `.env`
+   - На macOS это может быть: `/Users/ваше-имя/projects/mcp-allure/.env`
+   - На Windows это может быть: `C:/Users/ваше-имя/projects/mcp-allure/.env`
 
-* [Set up project integrations](https://scm.x5.ru/omni/autotest-team/allure-mcp/-/settings/integrations)
+6. Сохраните конфигурацию
 
-## Collaborate with your team
+### Шаг 6. Проверка работы
 
-* [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+1. Перезапустите ваш MCP клиент (KiloCode)
 
-## Test and Deploy
+2. Попробуйте попросить AI-ассистента что-то сделать с тест-кейсами, например:
+   ```
+   Найди все тест-кейсы в проекте
+   ```
+   или
+   ```
+   Получи тест-кейс с ID 12345
+   ```
 
-Use the built-in continuous integration in GitLab.
+3. Если всё настроено правильно, AI-ассистент должен выполнить запрос и показать результат
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+## Доступные методы MCP
 
-***
+Сервер предоставляет следующие инструменты для работы с Allure TestOps:
 
-# Editing this README
+### Основные методы для работы с тест-кейсами
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+#### allure_getTestCase (allure_findOne_11)
+Получить тест-кейс по ID
 
-## Suggestions for a good README
+**Параметры:**
+- `id` (обязательный) - ID тест-кейса
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+**Пример использования:**
+```
+Получи тест-кейс с ID 12345
+```
 
-## Name
-Choose a self-explaining name for your project.
+#### allure_getTestCases (allure_findAll_12)
+Найти все тест-кейсы проекта
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+**Параметры:**
+- `projectId` (обязательный) - ID проекта
+- `page` (опциональный) - номер страницы (начиная с 0)
+- `size` (опциональный) - количество элементов на странице
+- `sort` (опциональный) - критерии сортировки в формате: property(,asc|desc)
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+**Пример использования:**
+```
+Найди все тест-кейсы в проекте 42
+```
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+#### allure_createTestCase (allure_create_14)
+Создать новый тест-кейс
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+**Параметры:**
+- `body` (обязательный) - объект с данными тест-кейса
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+**Обязательные зависимости:**
+- `projectId`: ID проекта
+- `workflowId` + `statusId`: получи через `allure_findWorkflow(id)`, чтобы узнать доступные workflow и статусы
+- `testLayerId` (опционально): получи через GET /api/testlayer/suggest
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+**Пример использования:**
+```
+Создай тест-кейс в проекте 42 с названием "Тест авторизации"
+```
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+#### allure_updateTestCase (allure_patch_13)
+Обновить тест-кейс
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+**Параметры:**
+- `id` (обязательный) - ID тест-кейса
+- `body` (обязательный) - объект с данными для обновления
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+**Пример использования:**
+```
+Обнови тест-кейс с ID 12345: установи имя "Обновленное название"
+```
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+#### allure_deleteTestCase (allure_delete_13)
+Удалить тест-кейс
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+**Параметры:**
+- `id` (обязательный) - ID тест-кейса
+- `force` (опциональный) - принудительное удаление
 
-## License
-For open source projects, say how it is licensed.
+**Пример использования:**
+```
+Удали тест-кейс с ID 12345
+```
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+#### allure_suggestTestCases (allure_suggest_7)
+Поиск тест-кейсов по запросу
+
+**Параметры:**
+- `query` (опциональный) - поисковый запрос
+- `projectId` (опциональный) - ID проекта
+- `id` (опциональный) - список ID для исключения
+- `ignoreId` (опциональный) - список ID для игнорирования
+- `page` (опциональный) - номер страницы
+- `size` (опциональный) - количество элементов на странице
+- `sort` (опциональный) - сортировка
+
+**Пример использования:**
+```
+Найди тест-кейсы в проекте 42 по запросу "login"
+```
+
+#### allure_findWorkflow
+Найти workflow для тест-кейса
+
+**Параметры:**
+- `id` (обязательный) - ID тест-кейса
+
+**Пример использования:**
+```
+Получи workflow для тест-кейса 12345
+```
+
+### Методы для поиска тест-кейсов
+
+#### allure_searchTestCases (allure_search_1)
+Найти все тест-кейсы по заданному RQL (Rockable Query Language)
+
+**Параметры:**
+- `projectId` (обязательный) - ID проекта
+- `rql` (обязательный) - RQL-запрос для фильтрации тест-кейсов
+- `deleted` (опциональный) - искать в удаленных тест-кейсах
+- `page` (опциональный) - номер страницы
+- `size` (опциональный) - размер страницы
+- `sort` (опциональный) - критерии сортировки
+
+**Примеры RQL:**
+- `name like '%login%'` - поиск по части имени
+- `status = 'ACTIVE'` - фильтр по статусу
+- `tag = 'smoke'` - фильтр по тегу
+- `automated = true` - только автоматизированные
+
+**Пример использования:**
+```
+Найди тест-кейсы в проекте 42 с RQL запросом "name like '%login%'"
+```
+
+#### allure_validateSearchQuery (allure_validateQuery_1)
+Валидировать RQL запрос для поиска тест-кейсов
+
+**Параметры:**
+- `projectId` (обязательный) - ID проекта
+- `rql` (обязательный) - RQL запрос для валидации
+- `deleted` (опциональный) - валидировать для удаленных тест-кейсов
+
+### Методы для работы со сценариями тест-кейсов
+
+#### allure_getScenario (allure_getNormalizedScenario)
+Получить сценарий тест-кейса. Используй этот инструмент перед созданием/изменением/удалением шагов для получения актуальных числовых id шагов (ключи в scenarioSteps).
+
+**Параметры:**
+- `id` (обязательный) - ID тест-кейса
+
+**Пример использования:**
+```
+Получи сценарий тест-кейса 12345
+```
+
+#### allure_createScenarioStep (allure_create_16)
+Создать шаг сценария
+
+**Параметры:**
+- `body` (обязательный) - тело запроса с данными шага (ScenarioStepCreateDto)
+- `beforeId` (опциональный) - ID шага перед которым вставить
+- `afterId` (опциональный) - ID шага после которого вставить
+- `withExpectedResult` (опциональный) - включить ожидаемый результат
+
+**Пример использования:**
+```
+Добавь шаг в тест-кейс 12345 после шага 100
+```
+
+#### allure_updateScenarioStep (allure_patchById)
+Обновить шаг сценария
+
+**Параметры:**
+- `id` (обязательный) - ID шага
+- `body` (обязательный) - тело запроса с данными для обновления
+- `withExpectedResult` (опциональный) - включить ожидаемый результат
+
+**Пример использования:**
+```
+Обнови шаг 100 в тест-кейсе
+```
+
+#### allure_deleteScenarioStep (allure_deleteById_1)
+Удалить шаг сценария по ID
+
+**Параметры:**
+- `id` (обязательный) - ID шага
+
+**Пример использования:**
+```
+Удали шаг 100 из тест-кейса
+```
+
+### Методы для работы с тегами
+
+#### allure_getTags
+Получить теги тест-кейса
+
+**Параметры:**
+- `testCaseId` (обязательный) - ID тест-кейса
+
+**Пример использования:**
+```
+Получи теги тест-кейса 12345
+```
+
+#### allure_setTags
+Установить теги для тест-кейса. Заменяет все существующие теги.
+
+**Параметры:**
+- `testCaseId` (обязательный) - ID тест-кейса
+- `body` (обязательный) - массив тегов — каждый тег содержит id и name
+
+**Важно:** Тело запроса — МАССИВ объектов {id: number, name: string}. Для получения существующих тегов с их id:
+- Вызови `allure_getTags(testCaseId)` чтобы увидеть текущие теги тест-кейса
+- Или используй GET /api/tag/suggest для поиска тегов по имени
+
+**Пример тела:** `[{"id": 1, "name": "smoke"}, {"id": 2, "name": "regression"}]`
+
+**Пример использования:**
+```
+Установи теги smoke и regression для тест-кейса 12345
+```
+
+### Методы для работы с обзором
+
+#### allure_getOverview
+Получить обзорную информацию о тест-кейсе
+
+**Параметры:**
+- `testCaseId` (обязательный) - ID тест-кейса
+
+### Методы для работы с вложениями
+
+#### allure_getAttachments (allure_findAll_14)
+Получить все вложения тест-кейса
+
+**Параметры:**
+- `testCaseId` (обязательный) - ID тест-кейса
+- `page` (опциональный) - номер страницы
+- `size` (опциональный) - размер страницы
+- `sort` (опциональный) - критерии сортировки
+
+#### allure_uploadAttachment (allure_create_17)
+Загрузить новые вложения для тест-кейса
+
+**Параметры:**
+- `testCaseId` (обязательный) - ID тест-кейса
+- `body` (обязательный) - тело запроса с данными вложений
+
+**Примечание:** Загрузка файлов через multipart/form-data не поддерживается в текущей реализации клиента.
+
+#### allure_getAttachmentContent (allure_readContent_2)
+Получить содержимое вложения по ID
+
+**Параметры:**
+- `id` (обязательный) - ID вложения
+
+#### allure_updateAttachment (allure_patch_15)
+Обновить вложение тест-кейса
+
+**Параметры:**
+- `id` (обязательный) - ID вложения
+- `body` (обязательный) - тело запроса с данными для обновления
+
+#### allure_updateAttachmentContent (allure_updateContent_2)
+Обновить содержимое вложения тест-кейса
+
+**Параметры:**
+- `id` (обязательный) - ID вложения
+- `body` (обязательный) - тело запроса с новым содержимым
+
+#### allure_deleteAttachment (allure_delete_15)
+Удалить вложение тест-кейса
+
+**Параметры:**
+- `id` (обязательный) - ID вложения
+
+### Методы для работы с комментариями
+
+#### allure_getComments (allure_findAll_43)
+Получить все комментарии тест-кейса
+
+**Параметры:**
+- `testCaseId` (обязательный) - ID тест-кейса
+- `page` (опциональный) - номер страницы
+- `size` (опциональный) - размер страницы
+- `sort` (опциональный) - критерии сортировки
+
+#### allure_createComment (allure_create_49)
+Создать новый комментарий
+
+**Параметры:**
+- `body` (обязательный) - тело запроса с данными комментария
+
+**Пример использования:**
+```
+Добавь комментарий к тест-кейсу 12345: "Нужно добавить больше тестов"
+```
+
+#### allure_getComment (allure_findOne_33)
+Найти комментарий по ID
+
+**Параметры:**
+- `id` (обязательный) - ID комментария
+
+#### allure_updateComment (allure_patch_45)
+Обновить комментарий
+
+**Параметры:**
+- `id` (обязательный) - ID комментария
+- `body` (обязательный) - тело запроса с данными для обновления
+
+#### allure_deleteComment (allure_delete_39)
+Удалить комментарий по ID
+
+**Параметры:**
+- `id` (обязательный) - ID комментария
+
+### Методы для работы с кастомными полями
+
+#### allure_getCustomFieldsForTestCase (allure_getCustomFieldsWithValues_3)
+ПЕРВЫЙ ОБЯЗАТЕЛЬНЫЙ ШАГ перед обновлением кастомных полей тест-кейса.
+
+Получает список кастомных полей проекта с допустимыми значениями для конкретного тест-кейса.
+
+**Ответ содержит:**
+- `customField.id` — числовой id поля (нужен для allure_updateCustomFields)
+- `customField.name` — название поля для пользователя
+- `values[].id` — числовой id конкретного значения
+- `values[].name` — текст значения для пользователя
+
+**Параметры:**
+- `testCaseId` (обязательный) - ID тест-кейса
+- `projectId` (обязательный) - ID проекта
+
+#### allure_updateCustomFields (allure_updateCfvsOfTestCase)
+Обновить значения кастомных полей тест-кейса
+
+**Обязательный порядок вызовов:**
+1. Сначала вызови `allure_getCustomFieldsForTestCase(testCaseId, projectId)` чтобы получить список всех кастомных полей и их допустимых значений с числовыми id
+2. Из ответа извлеки: `customField.id` (числовой id поля) и `values[].id` (числовые id допустимых значений)
+3. Только после этого вызывай данный инструмент с корректными id
+
+**Параметры:**
+- `testCaseId` (обязательный) - ID тест-кейса
+- `body` (обязательный) - массив объектов CustomFieldWithValuesDto
+
+#### allure_getCustomFieldsForSelection (allure_getCustomFieldsWithValues_2)
+Найти кастомные поля с значениями для тест-кейсов
+
+**Параметры:**
+- `body` (обязательный) - тело запроса по схеме TestCaseTreeSelectionDto
+
+#### allure_suggestCustomFieldValues
+Поиск значений кастомного поля по строке запроса
+
+**Параметры:**
+- `query` (обязательный) - строка для поиска значения кастомного поля (название поля)
+- `projectId` (обязательный) - ID проекта
+- `page` (опциональный) - номер страницы (по умолчанию 0)
+- `size` (опциональный) - количество результатов на странице (по умолчанию 10)
+
+**Пример использования:**
+```
+Найди значения кастомного поля "Main Test Model" в проекте 123
+```
+
+### Методы для работы с примерами (параметризованными данными)
+
+#### allure_getExamples
+Получить примеры (параметризованные данные) тест-кейса
+
+**Параметры:**
+- `testCaseId` (обязательный) - ID тест-кейса
+- `page` (опциональный) - номер страницы
+- `size` (опциональный) - размер страницы
+- `sort` (опциональный) - критерии сортировки
+
+#### allure_setExamples
+Установить примеры (параметризованные данные) тест-кейса
+
+**Параметры:**
+- `testCaseId` (обязательный) - ID тест-кейса
+- `body` (обязательный) - массив строк примеров. Каждая строка — массив объектов ParameterValueDto с полями name и value
+
+**Пример тела:**
+```json
+[
+  [{"name": "browser", "value": "Chrome"}, {"name": "env", "value": "prod"}],
+  [{"name": "browser", "value": "Firefox"}, {"name": "env", "value": "staging"}]
+]
+```
+
+#### allure_renameParameter
+Переименовать параметр в примерах тест-кейса
+
+**Параметры:**
+- `testCaseId` (обязательный) - ID тест-кейса
+- `oldName` (обязательный) - текущее имя параметра
+- `newName` (обязательный) - новое имя параметра
+
+**Пример использования:**
+```
+Переименуй параметр "browser" в "Browser" для тест-кейса 12345
+```
+
+#### allure_generateNwise
+Генерировать N-wise комбинации параметров
+
+**Параметры:**
+- `body` (обязательный) - массив объектов TestCaseParameterValues — каждый содержит name (имя параметра) и values (список допустимых значений)
+- `n` (опциональный) - степень N-wise покрытия (по умолчанию 1)
+
+**Пример тела:**
+```json
+[
+  {"name": "browser", "values": ["Chrome", "Firefox", "Safari"]},
+  {"name": "env", "values": ["prod", "staging"]}
+]
+```
+
+**Пример использования:**
+```
+Сгенерируй N-wise комбинации для параметров browser и env
+```
+
+## Устранение неполадок
+
+### Docker не запускается
+
+**Проблема:** Команда `docker ps` выдает ошибку
+
+**Решение:**
+1. Убедитесь, что Docker Desktop запущен
+2. Перезапустите Docker Desktop
+3. Проверьте, достаточно ли места на диске
+
+### Ошибка при сборке образа
+
+**Проблема:** Команда `docker build` выдает ошибку
+
+**Решение:**
+1. Убедитесь, что вы находитесь в папке проекта (где находится Dockerfile)
+2. Проверьте, что Dockerfile существует: `ls Dockerfile`
+3. Попробуйте очистить кэш Docker: `docker system prune -a`
+
+### Ошибка: файл .env не найден
+
+**Проблема:** MCP клиент сообщает, что файл `.env` не найден
+
+**Решение:**
+1. Если вы используете KiloCode, проще убрать `--env-file` и передавать `ALLURE_TESTOPS_*` через секцию `env`
+2. Если нужен именно `.env`, проверьте, что файл `.env` существует в папке проекта: `ls .env`
+3. Убедитесь, что путь в конфигурации MCP указан правильно
+4. Используйте полный путь к файлу (не относительный)
+5. На macOS/Linux путь должен начинаться с `/`
+6. На Windows путь может быть в формате `C:/Users/...`
+
+### Ошибка аутентификации в Allure TestOps
+
+**Проблема:** AI-ассистент сообщает об ошибке аутентификации
+
+**Решение:**
+1. Проверьте, что URL сервера указан правильно в `ALLURE_TESTOPS_URL` или в файле `.env`
+2. Убедитесь, что API токен действителен и не истек
+3. Проверьте, что токен имеет права на чтение/запись тест-кейсов
+4. Попробуйте создать новый API токен
+5. Убедитесь, что в значениях переменных нет лишних пробелов или кавычек
+
+### Контейнер не запускается
+
+**Проблема:** MCP клиент не может запустить контейнер
+
+**Решение:**
+1. Проверьте логи контейнера: `docker logs allure-testops-mcp`
+2. Убедитесь, что образ существует: `docker images | grep allure-testops-mcp`
+3. Проверьте, что в контейнер действительно передаются `ALLURE_TESTOPS_URL` и `ALLURE_TESTOPS_API_TOKEN`
+4. Если используете `.env`, проверьте, что файл существует и содержит правильные данные
+5. Попробуйте запустить контейнер вручную:
+   ```bash
+   docker run -i --rm \
+     --env-file /полный/путь/к/.env \
+     --name allure-testops-mcp \
+     allure-testops-mcp:1.0.0
+   ```
+
+   Или без `.env`:
+   ```bash
+   docker run -i --rm \
+     --name allure-testops-mcp \
+     -e ALLURE_TESTOPS_URL=https://your-allure-testops.com \
+     -e ALLURE_TESTOPS_API_TOKEN=your-api-token \
+     -e ALLURE_TESTOPS_PROJECT_ID=123 \
+     allure-testops-mcp:1.0.0
+   ```
+
+### Тест-кейс не найден
+
+**Проблема:** AI-ассистент сообщает, что тест-кейс не найден
+
+**Решение:**
+1. Проверьте правильность ID тест-кейса
+2. Убедитесь, что тест-кейс существует в указанном проекте
+3. Проверьте, что у вас есть доступ к этому проекту
+4. Попробуйте найти тест-кейс через веб-интерфейс Allure TestOps
+5. Проверьте, что `ALLURE_TESTOPS_PROJECT_ID` передан с правильным значением
+
+### Ошибка: неверный формат .env файла
+
+**Проблема:** Сервер не может прочитать файл .env
+
+**Решение:**
+1. Убедитесь, что каждая строка в файле `.env` имеет формат `КЛЮЧ=ЗНАЧЕНИЕ`
+2. Не используйте кавычки вокруг значений (если они не нужны)
+3. Не оставляйте пробелы вокруг знака `=`
+4. Проверьте, что файл сохранен в кодировке UTF-8
+5. Убедитесь, что в конце файла нет лишних пустых строк
+
+## Особенности
+
+### Производительность
+- **Connection Pooling** - до 100 одновременных соединений, до 20 keepalive соединений на хост
+- **HTTP/2** - включен для улучшения производительности
+- **Кэширование** - in-memory LRU кэш для GET запросов (TTL: 300 секунд)
+
+### Надежность
+- **Retry механизм** - автоматические повторные попытки при ошибках (3 попытки с задержкой 2 секунды)
+- **Circuit Breaker** - защита от каскадных отказов (открывается после 5 failures, восстанавливается через 60 секунд)
+
+### Безопасность
+- API токен передается через переменные окружения или `.env` и не логируется
+- Используются HTTPS соединения для всех запросов
+- Валидация всех входных данных через Pydantic
+- Если используете `.env`, файл не должен коммититься в Git (проверьте `.gitignore`)
