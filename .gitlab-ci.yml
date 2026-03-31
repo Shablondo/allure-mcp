@@ -15,8 +15,10 @@ prepare:
   stage: prepare
   extends:
     - .prepare_configs
+  only:
+    - master
 
-build_image_dev_test:
+build:
   stage: build
   variables:
     DESTINATION: $rtfact_docker_dev_host/$CI_PROJECT_NAME:$CI_COMMIT_SHORT_SHA
