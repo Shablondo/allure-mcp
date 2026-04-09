@@ -17,8 +17,8 @@ MCP (Model Context Protocol) сервер позволяет AI-ассистен
    - Установите и запустите Docker Desktop
    - Проверьте установку: откройте терминал и выполните `docker --version`
 
-2. **Доступ к GitLab** - для клонирования проекта
-   - Учетная запись в вашем GitLab / GitHub / корпоративном Git-сервере
+2. **Доступ к GitHub** - для клонирования проекта
+   - Учетная запись в GitHub
    - Права на чтение репозитория с этим MCP сервером
 
 3. **Учетная запись в Allure TestOps** - для работы с тест-кейсами
@@ -39,12 +39,12 @@ MCP (Model Context Protocol) сервер позволяет AI-ассистен
 
 3. Клонируйте репозиторий:
    ```bash
-   git clone https://git.example.com/team/mcp-allure.git
+   git clone https://github.com/Shablondo/allure-mcp.git
    ```
 
 4. Перейдите в папку проекта:
    ```bash
-   cd mcp-allure
+   cd allure-mcp
    ```
 
 ### Шаг 2. Получение API токена Allure TestOps
@@ -135,7 +135,7 @@ MCP (Model Context Protocol) сервер позволяет AI-ассистен
 
 2. Соберите Docker образ:
    ```bash
-   docker build -t allure-testops-mcp:latest .
+   docker build -f build/Dockerfile -t allure-testops-mcp:latest .
    ```
 
 3. Дождитесь окончания сборки (это может занять несколько минут). В конце вы должны увидеть:
@@ -149,9 +149,38 @@ MCP (Model Context Protocol) сервер позволяет AI-ассистен
    docker images | grep allure-testops-mcp
    ```
 
-   Во время сборки Docker использует [`.dockerignore`](/Users/shablondo/allure-testops-mcp/.dockerignore), поэтому локальные секреты, шаблоны окружения и служебные файлы не попадают в build context.
+   Во время сборки Docker использует `.dockerignore`, поэтому локальные секреты, шаблоны окружения и служебные файлы не попадают в build context.
 
-### Шаг 5. Настройка MCP конфигурации
+### Шаг 5. Docker образ в GHCR
+
+Образ публикуется в GitHub Container Registry после push тега формата `vX.Y.Z`.
+
+Актуальный адрес образа:
+
+```bash
+ghcr.io/shablondo/allure-mcp:latest
+```
+
+Пример локального запуска:
+
+```bash
+docker run --rm -i \
+  -e ALLURE_TESTOPS_URL \
+  -e ALLURE_TESTOPS_API_TOKEN \
+  -e ALLURE_TESTOPS_PROJECT_ID \
+  -e ALLURE_TESTOPS_TIMEOUT \
+  -e ALLURE_TESTOPS_CACHE_TTL \
+  -e ALLURE_TESTOPS_RETRY_ATTEMPTS \
+  -e ALLURE_TESTOPS_NETWORK_RETRY_ATTEMPTS \
+  -e ALLURE_TESTOPS_RETRY_DELAY \
+  -e ALLURE_TESTOPS_CIRCUIT_BREAKER_FAILURES \
+  -e ALLURE_TESTOPS_CIRCUIT_BREAKER_TIMEOUT \
+  ghcr.io/shablondo/allure-mcp:latest
+```
+
+Для MCP-конфига вместо локальной сборки можно использовать этот образ напрямую.
+
+### Шаг 6. Настройка MCP конфигурации
 
 Теперь нужно настроить ваш MCP клиент (например, KiloCode) для использования этого сервера.
 
@@ -194,7 +223,7 @@ MCP (Model Context Protocol) сервер позволяет AI-ассистен
         "ALLURE_TESTOPS_CIRCUIT_BREAKER_FAILURES",
         "-e",
         "ALLURE_TESTOPS_CIRCUIT_BREAKER_TIMEOUT",
-        "allure-testops-mcp:latest"
+        "ghcr.io/shablondo/allure-mcp:latest"
       ],
       "env": {
         "ALLURE_TESTOPS_URL": "https://your-allure-testops.com",
@@ -229,8 +258,8 @@ MCP (Model Context Protocol) сервер позволяет AI-ассистен
         "--name",
         "allure-testops-mcp",
         "--env-file",
-        "/полный/путь/к/проекту/mcp-allure/.env",
-        "allure-testops-mcp:latest"
+        "/полный/путь/к/проекту/allure-mcp/.env",
+        "ghcr.io/shablondo/allure-mcp:latest"
       ],
       "disabled": false,
       "alwaysAllow": []
