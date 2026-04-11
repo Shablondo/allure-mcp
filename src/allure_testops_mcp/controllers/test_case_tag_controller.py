@@ -50,7 +50,6 @@ def register_test_case_tag_tools(mcp: FastMCP) -> None:
 ВАЖНО: тело запроса — МАССИВ объектов {id: number, name: string}.
 Для получения существующих тегов с их id:
 - Вызови allure_getTags(testCaseId) чтобы увидеть текущие теги тест-кейса
-- Или используй GET /api/tag/suggest для поиска тегов по имени
 
 Пример тела: [{"id": 1, "name": "smoke"}, {"id": 2, "name": "regression"}]""",
     )

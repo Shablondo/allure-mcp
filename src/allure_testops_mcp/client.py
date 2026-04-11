@@ -12,7 +12,7 @@ import time
 from typing import Any, AsyncIterator
 from contextlib import asynccontextmanager
 
-from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
+from tenacity import retry, retry_if_exception, retry_if_exception_type, stop_after_attempt, wait_fixed
 
 from .config import config
 
@@ -61,6 +61,7 @@ class CircuitBreakerState:
         self._failure_count = 0
         self._last_failure_time: float | None = None
         self._state = "closed"
+        self._probe_in_flight = False
 
     def success(self) -> None:
         """Фиксирует успешный запрос."""
@@ -68,13 +69,15 @@ class CircuitBreakerState:
             self._state = "closed"
             print(f"✓ Circuit Breaker: возвращаемся в CLOSED")
         self._failure_count = 0
+        self._probe_in_flight = False
 
     def failure(self) -> None:
         """Фиксирует неуспешный запрос."""
         self._failure_count += 1
         self._last_failure_time = time.time()
+        self._probe_in_flight = False
 
-        if self._failure_count >= self._failure_threshold:
+        if self._state == "half_open" or self._failure_count >= self._failure_threshold:
             if self._state != "open":
                 self._state = "open"
                 print(f"✗ Circuit Breaker: переходим в OPEN (после {self._failure_count} failures)")
@@ -94,14 +97,15 @@ class CircuitBreakerState:
                 return True
 
             elapsed = time.time() - self._last_failure_time
-            if elapsed >= self._recovery_timeout:
+            if elapsed >= self._recovery_timeout and not self._probe_in_flight:
                 self._state = "half_open"
+                self._probe_in_flight = True
                 print(f"⚡ Circuit Breaker: переходим в HALF_OPEN (пробуем один запрос)")
                 return True
             return False
 
         if self._state == "half_open":
-            return True
+            return False
 
         return False
 
@@ -112,6 +116,8 @@ class CircuitBreakerState:
 
 # Глобальный Circuit Breaker — разделяется между всеми экземплярами клиента
 _CIRCUIT_BREAKER: "CircuitBreakerState | None" = None
+_SHARED_ASYNC_CLIENT: httpx.AsyncClient | None = None
+_SHARED_ASYNC_CLIENT_LOCK = asyncio.Lock()
 
 def _get_circuit_breaker() -> "CircuitBreakerState":
     global _CIRCUIT_BREAKER
@@ -151,10 +157,34 @@ async def _clear_cache() -> None:
         _GET_CACHE.clear()
 
 
+def _cache_invalidation_prefixes(endpoint: str) -> tuple[str, ...]:
+    """Возвращает префиксы ключей, которые нужно инвалидировать после мутации."""
+    parts = [part for part in endpoint.split("/") if part]
+    if len(parts) >= 2:
+        return (f"/{parts[0]}/{parts[1]}", endpoint.rstrip("/"))
+    return (endpoint.rstrip("/"),)
+
+
+async def _invalidate_cache_for_endpoint(endpoint: str) -> None:
+    """Удаляет только те GET-кэши, которые связаны с изменяемым ресурсом."""
+    prefixes = tuple(prefix for prefix in _cache_invalidation_prefixes(endpoint) if prefix)
+    async with _GET_CACHE_LOCK:
+        keys_to_delete = [
+            key
+            for key in _GET_CACHE
+            if any(key.startswith(prefix) for prefix in prefixes)
+        ]
+        for key in keys_to_delete:
+            del _GET_CACHE[key]
+
+
+def _should_retry_api_error(error: BaseException) -> bool:
+    """Повторяем только transient API ошибки 5xx."""
+    return isinstance(error, AllureTestOpsError) and error.status_code is not None and error.status_code >= 500
+
+
 class AllureTestOpsClient:
     """Асинхронный HTTP клиент для Allure TestOps API."""
-
-    _instance: "AllureTestOpsClient | None" = None
 
     def __init__(self) -> None:
         """Инициализация клиента."""
@@ -171,17 +201,21 @@ class AllureTestOpsClient:
         Returns:
             AsyncClient с настройками connection pooling
         """
-        if self._async_client is None or self._async_client.is_closed:
-            limits = httpx.Limits(
-                max_keepalive_connections=20,
-                max_connections=100,
-            )
-            self._async_client = httpx.AsyncClient(
-                timeout=self._timeout,
-                limits=limits,
-                http2=True,
-            )
-        return self._async_client
+        global _SHARED_ASYNC_CLIENT
+        if _SHARED_ASYNC_CLIENT is None or _SHARED_ASYNC_CLIENT.is_closed:
+            async with _SHARED_ASYNC_CLIENT_LOCK:
+                if _SHARED_ASYNC_CLIENT is None or _SHARED_ASYNC_CLIENT.is_closed:
+                    limits = httpx.Limits(
+                        max_keepalive_connections=20,
+                        max_connections=100,
+                    )
+                    _SHARED_ASYNC_CLIENT = httpx.AsyncClient(
+                        timeout=self._timeout,
+                        limits=limits,
+                        http2=True,
+                    )
+        self._async_client = _SHARED_ASYNC_CLIENT
+        return _SHARED_ASYNC_CLIENT
 
     @asynccontextmanager
     async def _get_client_context(self) -> AsyncIterator[httpx.AsyncClient]:
@@ -210,8 +244,11 @@ class AllureTestOpsClient:
 
     async def close(self) -> None:
         """Закрывает HTTP клиент."""
-        if self._async_client is not None and not self._async_client.is_closed:
-            await self._async_client.aclose()
+        global _SHARED_ASYNC_CLIENT
+        async with _SHARED_ASYNC_CLIENT_LOCK:
+            if _SHARED_ASYNC_CLIENT is not None and not _SHARED_ASYNC_CLIENT.is_closed:
+                await _SHARED_ASYNC_CLIENT.aclose()
+            _SHARED_ASYNC_CLIENT = None
             self._async_client = None
 
     def _get_headers(self) -> dict[str, str]:
@@ -326,6 +363,7 @@ class AllureTestOpsClient:
     @retry(
         stop=stop_after_attempt(config.retry_attempts),
         wait=wait_fixed(config.retry_delay),
+        retry=retry_if_exception(_should_retry_api_error),
         reraise=True,
     )
     async def _retry_5xx_errors(self, func) -> Any:
@@ -476,7 +514,7 @@ class AllureTestOpsClient:
             AllureTestOpsError: Другие ошибки API
         """
         result = await self._make_request("POST", endpoint, params=params, json_data=json_data)
-        await _clear_cache()
+        await _invalidate_cache_for_endpoint(endpoint)
         return result
 
     async def patch(
@@ -504,7 +542,7 @@ class AllureTestOpsClient:
             AllureTestOpsError: Другие ошибки API
         """
         result = await self._make_request("PATCH", endpoint, params=params, json_data=json_data)
-        await _clear_cache()
+        await _invalidate_cache_for_endpoint(endpoint)
         return result
 
     async def put(
@@ -532,7 +570,7 @@ class AllureTestOpsClient:
             AllureTestOpsError: Другие ошибки API
         """
         result = await self._make_request("PUT", endpoint, params=params, json_data=json_data)
-        await _clear_cache()
+        await _invalidate_cache_for_endpoint(endpoint)
         return result
 
     async def delete(
@@ -555,7 +593,7 @@ class AllureTestOpsClient:
             AllureTestOpsError: Другие ошибки API
         """
         await self._make_request("DELETE", endpoint, params=params)
-        await _clear_cache()
+        await _invalidate_cache_for_endpoint(endpoint)
 
     async def get_raw(
         self,
