@@ -8,7 +8,7 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from ..client import AllureTestOpsClient
-from ._utils import build_params, delete_response, json_response
+from ._utils import apply_project_id_fallback, build_params, delete_response, json_response, resolve_project_id
 
 
 def register_test_case_tools(mcp: FastMCP) -> None:
@@ -66,9 +66,7 @@ def register_test_case_tools(mcp: FastMCP) -> None:
         name="allure_createTestCase",
         description="""Создать новый тест-кейс. Возвращает созданный тест-кейс в формате JSON.
 
-Обязательные зависимости:
-- projectId: ID проекта
-- testLayerId (опционально): получи через GET /api/testlayer/suggest""",
+Если `projectId` не указан в body, будет использован `ALLURE_TESTOPS_PROJECT_ID` из конфигурации, если он задан.""",
     )
     async def allure_create_14(
         body: dict[str, Any] = Field(
@@ -97,13 +95,13 @@ def register_test_case_tools(mcp: FastMCP) -> None:
         """
         client = AllureTestOpsClient()
         return await json_response(
-            client.post("/api/testcase", json_data=body),
+            client.post("/api/testcase", json_data=apply_project_id_fallback(body)),
             "Ошибка при создании тест-кейса",
         )
 
     @mcp.tool(
         name="allure_suggestTestCases",
-        description="Поиск тест-кейсов по запросу. Возвращает список тест-кейсов в формате JSON.",
+        description="Поиск тест-кейсов по запросу. Возвращает список тест-кейсов в формате JSON. Если projectId не передан, используется значение из конфигурации.",
     )
     async def allure_suggest_7(
         query: str | None = Field(
@@ -163,7 +161,7 @@ def register_test_case_tools(mcp: FastMCP) -> None:
         client = AllureTestOpsClient()
         params = build_params(
             query=query,
-            projectId=projectId,
+            projectId=resolve_project_id(projectId),
             id=id,
             ignoreId=ignoreId,
             page=page,
