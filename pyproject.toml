@@ -1,6 +1,6 @@
 [project]
 name = "allure-testops-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "MCP сервер для интеграции с Allure TestOps"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -10,12 +10,6 @@ dependencies = [
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
     "tenacity>=8.2.3",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
 ]
 
 [build-system]
@@ -30,7 +24,3 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-asyncio_mode = "auto"

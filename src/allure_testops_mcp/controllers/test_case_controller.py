@@ -68,7 +68,6 @@ def register_test_case_tools(mcp: FastMCP) -> None:
 
 Обязательные зависимости:
 - projectId: ID проекта
-- workflowId + statusId: получи через allure_findWorkflow(id), чтобы узнать доступные workflow и статусы
 - testLayerId (опционально): получи через GET /api/testlayer/suggest""",
     )
     async def allure_create_14(
@@ -273,33 +272,4 @@ def register_test_case_tools(mcp: FastMCP) -> None:
         return await json_response(
             client.patch(f"/api/testcase/{id}", json_data=body),
             "Ошибка при обновлении тест-кейса",
-        )
-
-    @mcp.tool(
-        name="allure_findWorkflow",
-        description="Найти workflow для тест-кейса. Возвращает workflow в формате JSON.",
-    )
-    async def allure_findWorkflow(
-        id: int = Field(
-            ...,
-            description="ID тест-кейса",
-            examples=[12345],
-        ),
-    ) -> str:
-        """
-        Найти workflow для тест-кейса.
-
-        Args:
-            id: ID тест-кейса
-
-        Returns:
-            JSON с данными workflow
-
-        Raises:
-            AllureTestOpsError: Ошибка при получении workflow
-        """
-        client = AllureTestOpsClient()
-        return await json_response(
-            client.get(f"/api/testcase/{id}/workflow"),
-            "Ошибка при получении workflow",
         )
