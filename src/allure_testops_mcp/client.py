@@ -251,13 +251,15 @@ class AllureTestOpsClient:
             _SHARED_ASYNC_CLIENT = None
             self._async_client = None
 
-    def _get_headers(self) -> dict[str, str]:
+    def _get_headers(self, files: list[tuple] | None = None) -> dict[str, str]:
         """Возвращает заголовки для запросов."""
-        return {
+        headers = {
             "Authorization": f"Api-Token {self._api_token}",
-            "Content-Type": "application/json",
             "Accept": "application/json",
         }
+        if not files:
+            headers["Content-Type"] = "application/json"
+        return headers
 
     def _is_transient_error(self, status_code: int | None) -> bool:
         """
@@ -323,6 +325,7 @@ class AllureTestOpsClient:
         endpoint: str,
         params: dict[str, Any] | None = None,
         json_data: dict[str, Any] | None = None,
+        files: list[tuple] | None = None,
         return_raw: bool = False,
     ) -> Any:
         """
@@ -333,6 +336,7 @@ class AllureTestOpsClient:
             endpoint: API endpoint
             params: Query параметры
             json_data: JSON тело запроса
+            files: Файлы для multipart/form-data загрузки
             return_raw: Вернуть сырой текст вместо JSON
 
         Returns:
@@ -345,16 +349,21 @@ class AllureTestOpsClient:
             AllureTestOpsError: Другие ошибки API
         """
         url = f"{self._base_url}{endpoint}"
-        headers = self._get_headers()
+        headers = self._get_headers(files=files)
+
+        request_kwargs: dict[str, Any] = {
+            "method": method,
+            "url": url,
+            "headers": headers,
+            "params": params,
+        }
+        if files:
+            request_kwargs["files"] = files
+        else:
+            request_kwargs["json"] = json_data
 
         async with self._get_client_context() as client:
-            response = await client.request(
-                method=method,
-                url=url,
-                headers=headers,
-                params=params,
-                json=json_data,
-            )
+            response = await client.request(**request_kwargs)
 
         if return_raw:
             return self._handle_response(response, return_raw=True)
@@ -384,6 +393,7 @@ class AllureTestOpsClient:
         endpoint: str,
         params: dict[str, Any] | None = None,
         json_data: dict[str, Any] | None = None,
+        files: list[tuple] | None = None,
         return_raw: bool = False,
     ) -> Any:
         """
@@ -394,6 +404,7 @@ class AllureTestOpsClient:
             endpoint: API endpoint
             params: Query параметры
             json_data: JSON тело запроса
+            files: Файлы для multipart/form-data загрузки
             return_raw: Вернуть сырой текст вместо JSON
 
         Returns:
@@ -418,7 +429,7 @@ class AllureTestOpsClient:
             nonlocal status_code
             try:
                 result = await self._make_request_network_retry(
-                    method, endpoint, params, json_data, return_raw
+                    method, endpoint, params, json_data, files, return_raw
                 )
                 self._circuit_breaker.success()
                 return result
@@ -494,6 +505,7 @@ class AllureTestOpsClient:
         endpoint: str,
         json_data: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
+        files: list[tuple] | None = None,
     ) -> dict[str, Any]:
         """
         Выполняет POST запрос к API.
@@ -502,6 +514,7 @@ class AllureTestOpsClient:
             endpoint: API endpoint
             json_data: JSON тело запроса
             params: Query параметры
+            files: Файлы для multipart/form-data загрузки
 
         Returns:
             Словарь с данными ответа
@@ -513,7 +526,7 @@ class AllureTestOpsClient:
             CircuitBreakerOpenError: Circuit breaker открыт
             AllureTestOpsError: Другие ошибки API
         """
-        result = await self._make_request("POST", endpoint, params=params, json_data=json_data)
+        result = await self._make_request("POST", endpoint, params=params, json_data=json_data, files=files)
         await _invalidate_cache_for_endpoint(endpoint)
         return result
 

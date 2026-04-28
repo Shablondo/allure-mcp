@@ -2,6 +2,8 @@
 TestCaseAttachmentController - MCP инструменты для работы с вложениями тест-кейсов.
 """
 
+import base64
+import mimetypes
 from typing import Any
 
 from fastmcp import FastMCP
@@ -64,7 +66,7 @@ def register_test_case_attachment_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="allure_uploadAttachment",
-        description="Загрузить новые вложения для тест-кейса. Возвращает созданные вложения в формате JSON.\n\nПримечание: Загрузка файлов через multipart/form-data не поддерживается в текущей реализации клиента.",
+        description="Загрузить новые вложения для тест-кейса через multipart/form-data. Возвращает созданные вложения в формате JSON.",
     )
     async def allure_create_17(
         testCaseId: int = Field(
@@ -72,15 +74,14 @@ def register_test_case_attachment_tools(mcp: FastMCP) -> None:
             description="ID тест-кейса",
             examples=[12345],
         ),
-        body: dict[str, Any] = Field(
+        files: list[dict[str, str]] = Field(
             ...,
-            description="Тело запроса с данными вложений",
+            description="Список файлов для загрузки. Каждый файл: name (имя с расширением) и content (base64-закодированное содержимое)",
             examples=[
-                {
-                    "files": [
-                        {"name": "screenshot.png", "content": "base64_encoded_content"}
-                    ]
-                }
+                [
+                    {"name": "screenshot.png", "content": "iVBORw0KGgoAAAANSUhEUg..."},
+                    {"name": "log.txt", "content": "TG9nIGNvbnRlbnQ="},
+                ]
             ],
         ),
     ) -> str:
@@ -89,7 +90,7 @@ def register_test_case_attachment_tools(mcp: FastMCP) -> None:
 
         Args:
             testCaseId: ID тест-кейса
-            body: Тело запроса с данными вложений
+            files: Список файлов (name и base64-контент)
 
         Returns:
             JSON с созданными вложениями
@@ -98,10 +99,17 @@ def register_test_case_attachment_tools(mcp: FastMCP) -> None:
             AllureTestOpsError: Ошибка при загрузке вложений
         """
         client = AllureTestOpsClient()
+
+        httpx_files: list[tuple] = []
+        for f in files:
+            file_bytes = base64.b64decode(f["content"])
+            mime_type, _ = mimetypes.guess_type(f["name"])
+            httpx_files.append(("file", (f["name"], file_bytes, mime_type or "application/octet-stream")))
+
         return await json_response(
             client.post(
                 "/api/testcase/attachment",
-                json_data=body,
+                files=httpx_files,
                 params=build_params(testCaseId=testCaseId),
             ),
             "Ошибка при загрузке вложений",
