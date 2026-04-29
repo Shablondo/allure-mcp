@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import json
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -113,3 +114,128 @@ class TestTestCaseAttachmentController:
             run(update_content(id=99, body=body))
 
             mock_client.put.assert_called_once_with("/api/testcase/attachment/99/content", json_data=body)
+
+    def test_upload_attachment_and_link_step_is_registered(self):
+        assert "allure_uploadAttachmentAndLinkStep" in self.registered_tools
+
+    def test_upload_attachment_and_link_step_uploads_then_creates_step(self):
+        tool = self.registered_tools["allure_uploadAttachmentAndLinkStep"]
+        content = base64.b64encode(b'{"openapi": "attachment"}').decode()
+        files = [{"name": "openapi.json", "content": content}]
+
+        with patch("allure_testops_mcp.controllers.test_case_attachment_controller.AllureTestOpsClient") as MockClient:
+            mock_client = MagicMock()
+            mock_client.post = AsyncMock(
+                side_effect=[
+                    [{"id": 3500635, "name": "openapi.json"}],
+                    {"createdStepId": 4570097},
+                ]
+            )
+            mock_client.get = AsyncMock(
+                return_value={
+                    "root": {"children": [101, 102]},
+                    "scenarioSteps": {
+                        "101": {"id": 101, "children": []},
+                        "102": {"id": 102, "children": []},
+                    },
+                }
+            )
+            MockClient.return_value = mock_client
+
+            result = json.loads(run(tool(testCaseId=644594, files=files)))
+
+            assert result["attachmentId"] == 3500635
+            assert result["afterId"] == 102
+            assert result["step"] == {"createdStepId": 4570097}
+            assert mock_client.post.call_args_list[0][0][0] == "/api/testcase/attachment"
+            assert mock_client.post.call_args_list[0][1]["params"]["testCaseId"] == 644594
+            assert mock_client.get.call_args_list[0][0][0] == "/api/testcase/644594/step"
+            assert mock_client.get.call_args_list[0][1]["use_cache"] is False
+            assert mock_client.post.call_args_list[1][0][0] == "/api/testcase/step"
+            assert mock_client.post.call_args_list[1][1]["json_data"] == {
+                "attachmentId": 3500635,
+                "testCaseId": 644594,
+            }
+            assert mock_client.post.call_args_list[1][1]["params"]["afterId"] == 102
+
+    def test_upload_attachment_and_link_step_defaults_attachment_content_type_to_json(self):
+        tool = self.registered_tools["allure_uploadAttachmentAndLinkStep"]
+        content = base64.b64encode(b'{"curl": "curl --location https://service.example/api"}').decode()
+        files = [{"name": "curl-command.sh", "content": content}]
+
+        with patch("allure_testops_mcp.controllers.test_case_attachment_controller.AllureTestOpsClient") as MockClient:
+            mock_client = MagicMock()
+            mock_client.post = AsyncMock(
+                side_effect=[
+                    [{"id": 3500635, "name": "curl-command.sh"}],
+                    {"createdStepId": 4570097},
+                ]
+            )
+            mock_client.get = AsyncMock(return_value={"root": {"children": []}, "scenarioSteps": {}})
+            MockClient.return_value = mock_client
+
+            run(tool(testCaseId=644594, files=files))
+
+            uploaded_files = mock_client.post.call_args_list[0][1]["files"]
+            assert uploaded_files[0][1][2] == "application/json"
+
+    def test_upload_attachment_and_link_step_accepts_utf8_text_content(self):
+        tool = self.registered_tools["allure_uploadAttachmentAndLinkStep"]
+        raw_text = '{\n    "id": "550e8400-e29b-41d4-a716-446655440001",\n    "name": "Тестовый товар"\n}'
+        files = [{"name": "response.json", "textContent": raw_text, "contentType": "application/json"}]
+
+        with patch("allure_testops_mcp.controllers.test_case_attachment_controller.AllureTestOpsClient") as MockClient:
+            mock_client = MagicMock()
+            mock_client.post = AsyncMock(
+                side_effect=[
+                    [{"id": 3500635, "name": "response.json"}],
+                    {"createdStepId": 4570097},
+                ]
+            )
+            mock_client.get = AsyncMock(return_value={"root": {"children": []}, "scenarioSteps": {}})
+            MockClient.return_value = mock_client
+
+            run(tool(testCaseId=644594, files=files))
+
+            uploaded_files = mock_client.post.call_args_list[0][1]["files"]
+            assert uploaded_files[0][1][0] == "response.json"
+            assert uploaded_files[0][1][1].decode("utf-8") == raw_text
+            assert uploaded_files[0][1][2] == "application/json"
+
+    def test_upload_attachment_and_link_step_uses_last_child_after_id_for_parent_step(self):
+        tool = self.registered_tools["allure_uploadAttachmentAndLinkStep"]
+        content = base64.b64encode(b"curl --location 'https://service.example/api'").decode()
+        files = [{"name": "curl-POST-api.sh", "content": content}]
+
+        with patch("allure_testops_mcp.controllers.test_case_attachment_controller.AllureTestOpsClient") as MockClient:
+            mock_client = MagicMock()
+            mock_client.post = AsyncMock(
+                side_effect=[
+                    [{"id": 3500636, "name": "curl-POST-api.sh"}],
+                    {"createdStepId": 4570098},
+                ]
+            )
+            mock_client.get = AsyncMock(
+                return_value={
+                    "root": {"children": [101, 102]},
+                    "scenarioSteps": {
+                        "101": {"id": 101, "children": [201, 202]},
+                        "102": {"id": 102, "children": []},
+                        "201": {"id": 201, "children": []},
+                        "202": {"id": 202, "children": []},
+                    },
+                }
+            )
+            MockClient.return_value = mock_client
+
+            result = json.loads(run(tool(testCaseId=644594, files=files, parentStepId=101)))
+
+            assert result["attachmentId"] == 3500636
+            assert result["parentStepId"] == 101
+            assert result["afterId"] == 202
+            assert mock_client.post.call_args_list[1][1]["json_data"] == {
+                "attachmentId": 3500636,
+                "parentId": 101,
+                "testCaseId": 644594,
+            }
+            assert mock_client.post.call_args_list[1][1]["params"]["afterId"] == 202
