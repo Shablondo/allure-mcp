@@ -512,7 +512,18 @@ docker run --rm -i \
 
 **Параметры:**
 - `testCaseId` (обязательный) - ID тест-кейса
-- `files` (обязательный) - список файлов. Каждый файл: `name` (имя с расширением) и `content` (base64-закодированное содержимое)
+- `files` (обязательный) - список файлов. Каждый файл: `name` и либо `content` (base64-закодированное содержимое), либо `textContent` (сырой UTF-8 текст). Для JSON/text/curl вложений предпочтительно использовать `textContent`.
+
+#### allure_uploadAttachmentAndLinkStep
+Загрузить вложение в тест-кейс и добавить attachment-step в сценарий. Используйте для готовых артефактов запроса, например финального `curl-command` attachment к шагу `Req`.
+
+**Параметры:**
+- `testCaseId` (обязательный) - ID тест-кейса
+- `files` (обязательный) - список файлов. Каждый файл: `name`, `contentType` и либо `textContent` (сырой UTF-8 текст для curl/json/text), либо base64 `content` для бинарных файлов. Для curl/json attachment используйте `textContent` и `application/json`; если `contentType` не передан, helper загрузит файл как `application/json`.
+- `parentStepId` (опциональный) - ID родительского шага
+- `afterId` (опциональный) - ID шага, после которого вставить attachment-step
+
+Если `afterId` не передан, helper читает сценарий тест-кейса. Без `parentStepId` attachment-step вставляется после последнего root step; с `parentStepId` - после последнего дочернего шага внутри указанного parent step.
 
 #### allure_getAttachmentContent (allure_readContent_2)
 Получить содержимое вложения по ID

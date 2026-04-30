@@ -8,9 +8,70 @@ from typing import Any
 
 from fastmcp import FastMCP
 from pydantic import Field
+from pydantic.fields import FieldInfo
 
 from ..client import AllureTestOpsClient
-from ._utils import build_params, delete_response, json_response, raw_response
+from ._utils import build_params, delete_response, dump_json, json_response, raw_response
+
+
+def _decode_multipart_files(
+    files: list[dict[str, str]],
+    default_content_type: str = "application/octet-stream",
+    infer_content_type_from_name: bool = True,
+) -> list[tuple]:
+    httpx_files: list[tuple] = []
+    for f in files:
+        raw_text = f.get("textContent") or f.get("text_content") or f.get("rawContent") or f.get("raw_content")
+        if raw_text is not None:
+            file_bytes = raw_text.encode("utf-8")
+        elif "content" in f:
+            file_bytes = base64.b64decode(f["content"])
+        else:
+            raise ValueError("Each file must contain either base64 content or raw textContent")
+        explicit_content_type = f.get("contentType") or f.get("content_type")
+        mime_type = None
+        if infer_content_type_from_name:
+            mime_type, _ = mimetypes.guess_type(f["name"])
+        content_type = explicit_content_type or mime_type or default_content_type
+        httpx_files.append(("file", (f["name"], file_bytes, content_type)))
+    return httpx_files
+
+
+def _extract_first_attachment_id(payload: Any) -> int:
+    if isinstance(payload, list) and payload:
+        return int(payload[0]["id"])
+    if isinstance(payload, dict):
+        if "id" in payload:
+            return int(payload["id"])
+        content = payload.get("content")
+        if isinstance(content, list) and content:
+            return int(content[0]["id"])
+    raise ValueError("Allure attachment upload response does not contain attachment id")
+
+
+def _last_root_step_id(scenario: dict[str, Any]) -> int | None:
+    root = scenario.get("root") if isinstance(scenario.get("root"), dict) else {}
+    children = root.get("children") or []
+    if not children:
+        return None
+    return int(children[-1])
+
+
+def _last_child_step_id(scenario: dict[str, Any], parent_step_id: int) -> int | None:
+    steps = scenario.get("scenarioSteps") if isinstance(scenario.get("scenarioSteps"), dict) else {}
+    parent_step = steps.get(str(parent_step_id)) or steps.get(parent_step_id)
+    if not isinstance(parent_step, dict):
+        return None
+    children = parent_step.get("children") or []
+    if not children:
+        return None
+    return int(children[-1])
+
+
+def _optional_int(value: int | FieldInfo | None) -> int | None:
+    if isinstance(value, FieldInfo):
+        return None
+    return value
 
 
 def register_test_case_attachment_tools(mcp: FastMCP) -> None:
@@ -76,11 +137,11 @@ def register_test_case_attachment_tools(mcp: FastMCP) -> None:
         ),
         files: list[dict[str, str]] = Field(
             ...,
-            description="Список файлов для загрузки. Каждый файл: name (имя с расширением) и content (base64-закодированное содержимое)",
+            description="Список файлов для загрузки. Каждый файл: name и либо content (base64), либо textContent (raw UTF-8 текст).",
             examples=[
                 [
                     {"name": "screenshot.png", "content": "iVBORw0KGgoAAAANSUhEUg..."},
-                    {"name": "log.txt", "content": "TG9nIGNvbnRlbnQ="},
+                    {"name": "response.json", "textContent": "{\"name\":\"Тестовый товар\"}", "contentType": "application/json"},
                 ]
             ],
         ),
@@ -90,7 +151,7 @@ def register_test_case_attachment_tools(mcp: FastMCP) -> None:
 
         Args:
             testCaseId: ID тест-кейса
-            files: Список файлов (name и base64-контент)
+            files: Список файлов (name + content base64 или textContent raw UTF-8)
 
         Returns:
             JSON с созданными вложениями
@@ -100,11 +161,7 @@ def register_test_case_attachment_tools(mcp: FastMCP) -> None:
         """
         client = AllureTestOpsClient()
 
-        httpx_files: list[tuple] = []
-        for f in files:
-            file_bytes = base64.b64decode(f["content"])
-            mime_type, _ = mimetypes.guess_type(f["name"])
-            httpx_files.append(("file", (f["name"], file_bytes, mime_type or "application/octet-stream")))
+        httpx_files = _decode_multipart_files(files)
 
         return await json_response(
             client.post(
@@ -241,4 +298,79 @@ def register_test_case_attachment_tools(mcp: FastMCP) -> None:
         return await json_response(
             client.put(f"/api/testcase/attachment/{id}/content", json_data=body),
             "Ошибка при обновлении содержимого вложения",
+        )
+
+    @mcp.tool(
+        name="allure_uploadAttachmentAndLinkStep",
+        description="Загрузить вложение в тест-кейс и добавить attachment-step в сценарий.",
+    )
+    async def allure_upload_attachment_and_link_step(
+        testCaseId: int = Field(
+            ...,
+            description="ID тест-кейса",
+            examples=[12345],
+        ),
+        files: list[dict[str, str]] = Field(
+            ...,
+            description=(
+                "Файлы: name, contentType и либо textContent (raw UTF-8 для curl/json/text), "
+                "либо content (base64 для бинарных файлов). Для curl/json вложений используй textContent и application/json."
+            ),
+            examples=[
+                [
+                    {
+                        "name": "curl-command.json",
+                        "textContent": "curl --location 'https://service.example/api'",
+                        "contentType": "application/json",
+                    }
+                ]
+            ],
+        ),
+        parentStepId: int | None = Field(
+            default=None,
+            description="ID родительского шага, если вложение нужно добавить внутрь шага",
+        ),
+        afterId: int | None = Field(
+            default=None,
+            description="ID шага, после которого вставить attachment-step",
+        ),
+    ) -> str:
+        client = AllureTestOpsClient()
+        upload_payload = await client.post(
+            "/api/testcase/attachment",
+            files=_decode_multipart_files(
+                files,
+                default_content_type="application/json",
+                infer_content_type_from_name=False,
+            ),
+            params=build_params(testCaseId=testCaseId),
+        )
+        attachment_id = _extract_first_attachment_id(upload_payload)
+
+        body: dict[str, Any] = {"attachmentId": attachment_id, "testCaseId": testCaseId}
+        resolved_parent_step_id = _optional_int(parentStepId)
+        if resolved_parent_step_id is not None:
+            body["parentId"] = resolved_parent_step_id
+
+        resolved_after_id = _optional_int(afterId)
+        if resolved_after_id is None:
+            scenario = await client.get(f"/api/testcase/{testCaseId}/step", use_cache=False)
+            if resolved_parent_step_id is not None:
+                resolved_after_id = _last_child_step_id(scenario, resolved_parent_step_id)
+            else:
+                resolved_after_id = _last_root_step_id(scenario)
+
+        step_payload = await client.post(
+            "/api/testcase/step",
+            json_data=body,
+            params=build_params(afterId=resolved_after_id),
+        )
+        return dump_json(
+            {
+                "attachment": upload_payload,
+                "attachmentId": attachment_id,
+                "step": step_payload,
+                "afterId": resolved_after_id,
+                "parentStepId": resolved_parent_step_id,
+            }
         )
