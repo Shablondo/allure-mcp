@@ -64,8 +64,8 @@ dmypy.json
 .DS_Store
 Thumbs.db
 
-# Documentation build
-docs/_build/
+# Documentation
+docs/
 site/
 
 # Test cases (can be mounted as volume)
