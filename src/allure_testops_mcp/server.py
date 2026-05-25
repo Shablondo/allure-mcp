@@ -4,6 +4,8 @@ MCP сервер для Allure TestOps.
 Предоставляет инструменты для работы с тест-кейсами и связанными сущностями.
 """
 
+import sys
+
 from fastmcp import FastMCP
 
 from .config import config
@@ -22,6 +24,8 @@ def main() -> None:
 
     Проверяет конфигурацию перед запуском и выводит ошибки если они есть.
     """
+    sys.stdout.reconfigure(encoding="utf-8")
+
     # Проверяем конфигурацию
     errors = config.validate()
     if errors:
